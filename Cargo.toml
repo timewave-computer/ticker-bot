@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "ticker-bot",
+  "local-interchaintest",
+]
+resolver = "2"

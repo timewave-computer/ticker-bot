@@ -1,0 +1,34 @@
+[[contract]]
+type = "stride_liquid_staker"
+chain_prefix = "neutron"
+address = "neutron1zxq8zksdszcsryea43mxqu5c2xysm9thrfe0svlal54fkcs5w2wqpg555p"
+
+[[contract]]
+type = "ibc_forwarder"
+chain_prefix = "neutron"
+address = "neutron1jhz0k60dj22yyr35d3ekyuyt9jff3jhtnxdar8rgl5elu5vkmygq66fx6j"
+
+[[contract]]
+type = "ibc_forwarder"
+chain_prefix = "neutron"
+address = "neutron1pr6peaq07vhu7jdayk4s3atkrkjwk2fth54d6nqpmez443tdf6hqkssnmu"
+
+[[contract]]
+type = "astroport_liquid_pooler"
+chain_prefix = "neutron"
+address = "neutron10u2ur84t2ggnf4cx7ezc4av7pl5wujvca9m4xmzus5akcydd06hs24czz3"
+
+[[contract]]
+type = "remote_chain_splitter"
+chain_prefix = "neutron"
+address = "neutron12plsx5y0dtztt82qj8205xfm0skl423t49d5f8v4grlf674ugg9qtv87qn"
+
+[[contract]]
+type = "interchain_router"
+chain_prefix = "neutron"
+address = "neutron10xcjhm58450tacpp2pzzpuz3cklrvkhaqudaqhayz3xamm0x0p8sv3nr9m"
+
+[[chain]]
+chain_prefix = "neutron"
+base_denom = "untrn"
+endpoint = "https://0.0.0.0:35617"
