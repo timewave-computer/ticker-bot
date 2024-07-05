@@ -1,5 +1,6 @@
-use serde::Deserialize;
 use std::collections::HashMap;
+
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct ChainsVec {
@@ -66,11 +67,21 @@ pub struct ConfigFileOverrides {
     pub paths: String,
 }
 
-#[derive(Deserialize)]
-pub struct Validator {
-    pub name: String,
-    pub address: String,
-    pub weight: u64,
+#[derive(Deserialize, Debug)]
+pub struct Channel {
+    pub channel_id: String,
+    pub connection_hops: Vec<String>,
+    pub counterparty: Counterparty,
+    pub ordering: String,
+    pub port_id: String,
+    pub state: String,
+    pub version: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Counterparty {
+    pub channel_id: String,
+    pub port_id: String,
 }
 
 #[derive(Deserialize)]

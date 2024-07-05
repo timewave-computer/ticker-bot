@@ -1,14 +1,25 @@
-use std::{io::Write, path::Path};
+use std::{
+    fs::{self, DirEntry},
+    io,
+};
 
-use localic_std::transactions::ChainRequestBuilder;
+use log::info;
 use serde::Serialize;
 use serde_json::Value;
 
 use super::types::{ChainsVec, Logs};
 
-pub fn read_chains_file(file_path: &str) -> Result<ChainsVec, std::io::Error> {
+pub fn pretty_print(obj: &Value) {
+    let mut buf = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+    let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+    obj.serialize(&mut ser).unwrap();
+    info!("{}", String::from_utf8(buf).unwrap());
+}
+
+pub fn read_json_file(file_path: &str) -> Result<ChainsVec, io::Error> {
     // Read the file to a string
-    let data = std::fs::read_to_string(file_path)?;
+    let data = fs::read_to_string(file_path)?;
 
     // Parse the string into the struct
     let chain: ChainsVec = serde_json::from_str(&data)?;
@@ -26,28 +37,13 @@ pub fn read_logs_file(file_path: &str) -> Result<Logs, std::io::Error> {
     Ok(logs)
 }
 
-pub fn pretty_print(obj: &Value) {
-    let mut buf = Vec::new();
-    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
-    let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-    obj.serialize(&mut ser).unwrap();
-    println!("{}", String::from_utf8(buf).unwrap());
-}
+pub fn read_artifacts(path: &str) -> Result<Vec<DirEntry>, io::Error> {
+    let artifacts = fs::read_dir(path).unwrap();
 
-pub fn write_json_file(path: &str, data: &str) {
-    let path = Path::new(path);
-    let mut file = std::fs::File::create(path).unwrap();
-    file.write_all(data.as_bytes()).unwrap();
+    let mut dir_entries = vec![];
+    for dir in artifacts.into_iter() {
+        dir_entries.push(dir.unwrap());
+    }
 
-    println!("file written: {:?}", path);
-}
-
-pub fn write_str_to_container_file(rb: &ChainRequestBuilder, container_path: &str, content: &str) {
-    // TODO: fix this. perhaps draw inspiration from request_builder upload_file.
-    let filewriting = rb.exec(
-        &format!("/bin/sh -c echo '{}' > {}", content, container_path),
-        true,
-    );
-    println!("\nwrite str to container file response:\n");
-    pretty_print(&filewriting);
+    Ok(dir_entries)
 }

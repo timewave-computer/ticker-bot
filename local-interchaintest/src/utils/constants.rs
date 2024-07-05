@@ -16,8 +16,11 @@ pub const STRIDE_CHAIN_ID: &str = "localstride-3";
 pub const ACC_0_ADDRESS_STRIDE: &str = "stride1hj5fveer5cjtn4wd6wstzugjfdxzl0xp98jwc0";
 
 pub const CHAIN_CONFIG_PATH: &str = "local-interchaintest/chains/neutron_gaia.json";
+pub const LOCAL_CODE_ID_CACHE_PATH: &str = "local-interchaintest/code_id_cache.json";
 pub const LOGS_PATH: &str = "local-interchaintest/configs/logs.json";
-pub const WASM_PATH: &str = "local-interchaintest/wasms/";
+
+pub const ASTROPORT_PATH: &str = "local-interchaintest/wasms/astroport";
+pub const VALENCE_PATH: &str = "local-interchaintest/wasms/valence";
 
 pub const ADMIN_KEY: &str = "admin";
 pub const ACC_0_KEY: &str = "acc0";

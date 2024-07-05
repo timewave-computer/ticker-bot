@@ -16,27 +16,25 @@ use cosmwasm_std::{coin, Binary, Coin, Decimal, Uint128, Uint64};
 use covenant_utils::{InterchainCovenantParty, PoolPriceConfig, SingleSideLpLimits};
 use cw_utils::Expiration;
 use local_ictest_e2e::utils::constants::{
-    ACC_0_ADDRESS_GAIA, ACC_1_ADDRESS_GAIA, ACC_1_ADDRESS_NEUTRON, ADMIN_KEY, BOT_ADDRESS,
-    GAIA_CHAIN, LOGS_PATH, NATIVE_ATOM_DENOM, NATIVE_STATOM_DENOM, NEUTRON_CHAIN_ID, STRIDE_CHAIN,
-    TICKER_BOT_CONFIG_LOCATION,
+    ACC_0_ADDRESS_GAIA, ACC_1_ADDRESS_GAIA, ACC_1_ADDRESS_NEUTRON, ADMIN_KEY, ASTROPORT_PATH,
+    BOT_ADDRESS, GAIA_CHAIN, LOGS_PATH, NATIVE_ATOM_DENOM, NATIVE_STATOM_DENOM, NEUTRON_CHAIN_ID,
+    STRIDE_CHAIN, TICKER_BOT_CONFIG_LOCATION, VALENCE_PATH,
 };
-use local_ictest_e2e::utils::file_system::{read_chains_file, read_logs_file};
+use local_ictest_e2e::utils::file_system::{read_json_file, read_logs_file};
 use local_ictest_e2e::utils::ibc::{get_ibc_denom, ibc_send};
 use local_ictest_e2e::utils::liquid_staking::set_up_host_zone;
-use local_ictest_e2e::utils::queries::query_block_height;
-use local_ictest_e2e::utils::setup::fund_address;
+
+use local_ictest_e2e::utils::setup::deploy_contracts_on_chain;
 use local_ictest_e2e::utils::stride::liquid_stake;
 use local_ictest_e2e::utils::{
     constants::{ACC_0_ADDRESS_NEUTRON, ACC_0_KEY, API_URL, CHAIN_CONFIG_PATH, NEUTRON_CHAIN},
-    setup::{store_astroport_contracts, store_valence_contracts},
     test_context::TestContext,
 };
 
+use localic_std::modules::bank::send;
 use localic_std::modules::cosmwasm::{contract_execute, contract_query};
 use localic_std::{
-    errors::LocalError,
-    modules::cosmwasm::{contract_instantiate, CosmWasm},
-    polling::poll_for_start,
+    errors::LocalError, modules::cosmwasm::contract_instantiate, polling::poll_for_start,
 };
 use reqwest::blocking::Client;
 use ticker_bot::config::{Chain, Config, Contract, ContractType};
@@ -49,38 +47,47 @@ use valence_covenant_single_party_pol::msg::{
 
 // Run 'local-ic start neutron_gaia --api-port 42069' before running the tests
 fn main() -> Result<(), LocalError> {
+    env_logger::init();
     let client = Client::new();
     poll_for_start(&client, API_URL, 300)?;
 
-    let configured_chains = read_chains_file(CHAIN_CONFIG_PATH).unwrap();
+    let configured_chains = read_json_file(CHAIN_CONFIG_PATH).unwrap();
 
     let mut test_ctx = TestContext::from(configured_chains);
 
-    let mut cw = CosmWasm::new(
-        test_ctx
-            .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
-    );
+    deploy_contracts_on_chain(&mut test_ctx, ASTROPORT_PATH, NEUTRON_CHAIN);
+    deploy_contracts_on_chain(&mut test_ctx, VALENCE_PATH, NEUTRON_CHAIN);
 
-    // Store all the contracts
-    let valence_code_ids = store_valence_contracts(&mut cw)?;
-    let astroport_code_ids = store_astroport_contracts(&mut cw)?;
+    let astroport_native_coin_registry_code_id = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("astroport_native_coin_registry")
+        .unwrap();
 
-    let code_id_covenant_single_party_pol = valence_code_ids[0];
-    let code_id_astroport_liquid_pooler = valence_code_ids[1];
-    let code_id_ibc_forwarder = valence_code_ids[2];
-    let code_id_interchain_router = valence_code_ids[3];
-    let code_id_remote_chain_splitter = valence_code_ids[4];
-    let code_id_single_party_pol_holder = valence_code_ids[5];
-    let code_id_stride_single_staker = valence_code_ids[6];
+    let astroport_pair_stable_code_id = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("astroport_pair_stable")
+        .unwrap();
 
-    let code_id_astroport_factory = astroport_code_ids[0];
-    let code_id_astroport_native_coin_registry = astroport_code_ids[1];
-    let code_id_astroport_pair_stable = astroport_code_ids[2];
-    let code_id_astroport_token = astroport_code_ids[3];
-    let code_id_astroport_whitelist = astroport_code_ids[4];
+    let astroport_token_code_id = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("astroport_token")
+        .unwrap();
 
-    // Instantiate astroport and make an stATOM/ATOM stable pair
+    let astroport_whitelist_code_id = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("astroport_whitelist")
+        .unwrap();
+
+    let astroport_factory_code_id = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("astroport_factory")
+        .unwrap();
+
     let native_coin_registry_instantiate_msg = NativeCoinRegistryInstantiateMsg {
         owner: ACC_0_ADDRESS_NEUTRON.to_string(),
     };
@@ -90,7 +97,7 @@ fn main() -> Result<(), LocalError> {
             .get_request_builder()
             .get_request_builder(NEUTRON_CHAIN),
         ACC_0_KEY,
-        code_id_astroport_native_coin_registry,
+        astroport_native_coin_registry_code_id,
         &serde_json::to_string(&native_coin_registry_instantiate_msg).unwrap(),
         "native-coin-registry",
         None,
@@ -99,18 +106,18 @@ fn main() -> Result<(), LocalError> {
 
     let factory_instantiate_msg = FactoryInstantiateMsg {
         pair_configs: vec![PairConfig {
-            code_id: code_id_astroport_pair_stable,
+            code_id: astroport_pair_stable_code_id,
             pair_type: PairType::Stable {},
             total_fee_bps: 0,
             maker_fee_bps: 0,
             is_disabled: false,
             is_generator_disabled: true,
         }],
-        token_code_id: code_id_astroport_token,
+        token_code_id: astroport_token_code_id,
         fee_address: None,
         generator_address: None,
         owner: ACC_0_ADDRESS_NEUTRON.to_string(),
-        whitelist_code_id: code_id_astroport_whitelist,
+        whitelist_code_id: astroport_whitelist_code_id,
         coin_registry_address: native_coin_registry_contract.address.to_string(),
     };
 
@@ -119,7 +126,7 @@ fn main() -> Result<(), LocalError> {
             .get_request_builder()
             .get_request_builder(NEUTRON_CHAIN),
         ACC_0_KEY,
-        code_id_astroport_factory,
+        astroport_factory_code_id,
         &serde_json::to_string(&factory_instantiate_msg).unwrap(),
         "astroport-factory",
         None,
@@ -197,7 +204,7 @@ fn main() -> Result<(), LocalError> {
 
     // Liquid stake some ATOM to get stATOM on Stride to add liquidity to the astroport pool
 
-    // First we have to register Gaia as a host zone and register validators that we can stake on
+    // First we have to register Gaia as a host zone
     set_up_host_zone(&mut test_ctx);
 
     // Now we can stake using autopilot
@@ -322,8 +329,56 @@ fn main() -> Result<(), LocalError> {
 
     thread::sleep(Duration::from_secs(5));
 
+    let code_id_ibc_forwarder = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("valence_ibc_forwarder")
+        .unwrap();
+
+    let code_id_single_party_pol_holder = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("valence_single_party_pol_holder")
+        .unwrap();
+
+    let code_id_remote_chain_splitter = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("valence_remote_chain_splitter")
+        .unwrap();
+
+    let code_id_astroport_liquid_pooler = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("valence_astroport_liquid_pooler")
+        .unwrap();
+
+    let code_id_stride_liquid_staker = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("valence_stride_liquid_staker")
+        .unwrap();
+
+    let code_id_interchain_router = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("valence_interchain_router")
+        .unwrap();
+
+    let code_id_single_party_pol_covenant = *test_ctx
+        .get_chain(NEUTRON_CHAIN)
+        .contract_codes
+        .get("valence_covenant_single_party_pol")
+        .unwrap();
+
     // Now we can start the covenants
-    let current_height = query_block_height(NEUTRON_CHAIN_ID.to_string());
+    let chain = localic_std::node::Chain::new(
+        test_ctx
+            .get_request_builder()
+            .get_request_builder(NEUTRON_CHAIN),
+    );
+    let current_height = chain.get_height();
+
     let instantiate_covenant_msg = SinglePartyPolInstantiateMsg {
         label: "single_party_pol_covenant".to_string(),
         timeouts: Timeouts {
@@ -335,7 +390,7 @@ fn main() -> Result<(), LocalError> {
             holder_code: code_id_single_party_pol_holder,
             remote_chain_splitter_code: code_id_remote_chain_splitter,
             liquid_pooler_code: code_id_astroport_liquid_pooler,
-            liquid_staker_code: code_id_stride_single_staker,
+            liquid_staker_code: code_id_stride_liquid_staker,
             interchain_router_code: code_id_interchain_router,
         },
         clock_tick_max_gas: None,
@@ -498,7 +553,7 @@ fn main() -> Result<(), LocalError> {
             .get_request_builder()
             .get_request_builder(NEUTRON_CHAIN),
         ACC_0_KEY,
-        code_id_covenant_single_party_pol,
+        code_id_single_party_pol_covenant,
         &serde_json::to_string(&instantiate_covenant_msg).unwrap(),
         "single-party-pol-covenant",
         None,
@@ -620,40 +675,35 @@ fn main() -> Result<(), LocalError> {
     std::fs::write(TICKER_BOT_CONFIG_LOCATION, config).unwrap();
 
     // Fund all addresses with NTRN
-    fund_address(
-        ntrn_request_builder,
+    let addresses = vec![
         liquid_staker_address,
-        Uint128::new(10000000),
-    )?;
-    fund_address(
-        ntrn_request_builder,
         ibc_forwarder_address,
-        Uint128::new(10000000),
-    )?;
-    fund_address(
-        ntrn_request_builder,
         liquid_pooler_forwarder_address,
-        Uint128::new(10000000),
-    )?;
-    fund_address(
-        ntrn_request_builder,
         liquid_pooler_address,
-        Uint128::new(10000000),
-    )?;
-    fund_address(
-        ntrn_request_builder,
         remote_chain_splitter_address,
-        Uint128::new(10000000),
-    )?;
-    fund_address(
-        ntrn_request_builder,
         interchain_router_address,
-        Uint128::new(10000000),
-    )?;
-    fund_address(ntrn_request_builder, holder_address, Uint128::new(10000000))?;
+        holder_address,
+        BOT_ADDRESS,
+    ];
 
-    // Fund the bot as well so that it has enough for fees
-    fund_address(ntrn_request_builder, BOT_ADDRESS, Uint128::new(10000000))?;
+    for address in &addresses {
+        send(
+            test_ctx
+                .get_request_builder()
+                .get_request_builder(NEUTRON_CHAIN),
+            ACC_0_KEY,
+            address,
+            &[Coin {
+                denom: "untrn".to_string(),
+                amount: Uint128::new(10000000),
+            }],
+            &Coin {
+                denom: "untrn".to_string(),
+                amount: Uint128::new(5000),
+            },
+        )
+        .unwrap();
+    }
 
     println!("Bot is now ready to run!");
 

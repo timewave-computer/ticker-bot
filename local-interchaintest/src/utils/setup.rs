@@ -1,155 +1,76 @@
-use std::path::Path;
-
-use cosmwasm_std::{Coin, Uint128};
-use localic_std::{
-    errors::LocalError,
-    modules::{bank::send, cosmwasm::CosmWasm},
-    transactions::ChainRequestBuilder,
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::{Read, Write},
 };
 
-use super::constants::ACC_0_KEY;
+use localic_std::modules::cosmwasm::CosmWasm;
+use log::{error, info};
 
-pub fn store_valence_contracts(cw: &mut CosmWasm) -> Result<Vec<u64>, LocalError> {
-    let abs_path_wasms: std::path::PathBuf =
-        std::fs::canonicalize(Path::new("./local-interchaintest/wasms/valence")).unwrap();
+use super::{
+    constants::{ACC_0_KEY, LOCAL_CODE_ID_CACHE_PATH, WASM_EXTENSION},
+    file_system::read_artifacts,
+    test_context::TestContext,
+};
 
-    let code_id_covenant_single_party_pol = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/valence_covenant_single_party_pol.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
+pub fn deploy_contracts_on_chain(test_ctx: &mut TestContext, path: &str, chain: &str) {
+    if fs::metadata(path).is_ok_and(|m| m.is_dir()) {
+        info!("Path {} exists, deploying contracts...", path);
+    } else {
+        error!(
+            "Path {} does not exist, you might have to build and optimize contracts",
+            path
+        );
+        return;
+    };
+    let dir_entries = read_artifacts(path).unwrap();
 
-    let code_id_astroport_liquid_pooler = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/valence_astroport_liquid_pooler.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
+    // Use a local cache to avoid storing the same contract multiple times, useful for local testing
+    let mut content = String::new();
+    let cache: HashMap<String, u64> = match File::open(LOCAL_CODE_ID_CACHE_PATH) {
+        Ok(mut file) => {
+            if let Err(err) = file.read_to_string(&mut content) {
+                error!("Failed to read cache file: {}", err);
+                HashMap::new()
+            } else {
+                serde_json::from_str(&content).unwrap_or_default()
+            }
+        }
+        Err(_) => {
+            // If the file does not exist, we'll create it later
+            HashMap::new()
+        }
+    };
 
-    let code_id_ibc_forwarder = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/valence_ibc_forwarder.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
+    let local_chain = test_ctx.get_mut_chain(chain);
+    // Add all cache entries to the local chain
+    for (id, code_id) in cache {
+        local_chain.contract_codes.insert(id, code_id);
+    }
 
-    let code_id_interchain_router = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/valence_interchain_router.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
+    for entry in dir_entries {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some(WASM_EXTENSION) {
+            let abs_path = path.canonicalize().unwrap();
+            let mut cw = CosmWasm::new(&local_chain.rb);
+            let id = abs_path.file_stem().unwrap().to_str().unwrap();
 
-    let code_id_remote_chain_splitter = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/valence_remote_chain_splitter.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
+            // To avoid storing multiple times during the same execution
+            if local_chain.contract_codes.contains_key(id) {
+                info!(
+                    "Contract {} already deployed on chain {}, skipping...",
+                    id, chain
+                );
+                continue;
+            }
 
-    let code_id_single_party_pol_holder = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/valence_single_party_pol_holder.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
+            let code_id = cw.store(ACC_0_KEY, abs_path.as_path()).unwrap();
 
-    let code_id_stride_liquid_staker = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/valence_stride_liquid_staker.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
+            local_chain.contract_codes.insert(id.to_string(), code_id);
+        }
+    }
 
-    Ok(vec![
-        code_id_covenant_single_party_pol,
-        code_id_astroport_liquid_pooler,
-        code_id_ibc_forwarder,
-        code_id_interchain_router,
-        code_id_remote_chain_splitter,
-        code_id_single_party_pol_holder,
-        code_id_stride_liquid_staker,
-    ])
-}
-
-pub fn store_astroport_contracts(cw: &mut CosmWasm) -> Result<Vec<u64>, LocalError> {
-    let abs_path_wasms: std::path::PathBuf =
-        std::fs::canonicalize(Path::new("./local-interchaintest/wasms/astroport")).unwrap();
-
-    let code_id_astroport_factory = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/astroport_factory.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
-
-    let code_id_astroport_native_coin_registry = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/astroport_native_coin_registry.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
-
-    let code_id_astroport_pair_stable = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/astroport_pair_stable.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
-
-    let code_id_astroport_token = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/astroport_token.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
-
-    let code_id_astroport_whitelist = cw.store(
-        ACC_0_KEY,
-        Path::new(&format!(
-            "{}/astroport_whitelist.wasm",
-            abs_path_wasms.display()
-        )),
-    )?;
-
-    Ok(vec![
-        code_id_astroport_factory,
-        code_id_astroport_native_coin_registry,
-        code_id_astroport_pair_stable,
-        code_id_astroport_token,
-        code_id_astroport_whitelist,
-    ])
-}
-
-pub fn fund_address(
-    rb: &ChainRequestBuilder,
-    address: &str,
-    amount: Uint128,
-) -> Result<(), LocalError> {
-    send(
-        rb,
-        ACC_0_KEY,
-        address,
-        &[Coin {
-            denom: "untrn".to_string(),
-            amount,
-        }],
-        &Coin {
-            denom: "untrn".to_string(),
-            amount: Uint128::new(5000),
-        },
-    )?;
-    Ok(())
+    let contract_codes = serde_json::to_string(&local_chain.contract_codes).unwrap();
+    let mut file = File::create(LOCAL_CODE_ID_CACHE_PATH).unwrap();
+    file.write_all(contract_codes.as_bytes()).unwrap();
 }

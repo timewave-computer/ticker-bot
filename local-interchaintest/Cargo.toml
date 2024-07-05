@@ -12,7 +12,6 @@ reqwest = { version = "0.11.20", features = ["blocking", "json"] }
 serde_json = { version = "1.0.117" }
 serde = { version = "1.0.203", features = ["derive"] }
 sha2 = "0.10.8"
-hex = "0.4.3"
 
 astroport = { git = "https://github.com/astroport-fi/astroport-core.git", rev = "700f66d" }
 valence-covenant-single-party-pol = { git = "https://github.com/timewave-computer/covenants", branch = "keyne/permissionless-tick" }
@@ -22,3 +21,6 @@ ticker-bot = { path = "../ticker-bot" }
 toml = "0.8.14"
 cw20 = { version = "0.15.1" }
 cw-utils = "1.0.3"
+log = "0.4.22"
+env_logger = "0.11.3"
+anyhow = "1.0.86"
