@@ -1,34 +1,34 @@
 [[contract]]
 type = "stride_liquid_staker"
 chain_prefix = "neutron"
-address = "neutron12awcg84h2r90gh0aqpn66gl2qrlwdyweqjkuptg5zlfmrm668exslnxnyt"
+address = "neutron1kklrhxe95077y380gvsa0f8nkm2ksye444dtmeq7tvtnydtv0umsa6e9ec"
 
 [[contract]]
 type = "ibc_forwarder"
 chain_prefix = "neutron"
-address = "neutron1slxdtn39qgeukc4kmfuxlhz5thwed2ffawl76jfhh95wavns8jgq3tspa0"
+address = "neutron1hglusfulepxanhchuqa0m6cptauldsdkwml7h53msz60khnvx0sq2y34cm"
 
 [[contract]]
 type = "ibc_forwarder"
 chain_prefix = "neutron"
-address = "neutron155r0uy35rurc7n9844352r4eynvd5v2e06x3lnsyzzw4cdzam7vs50yefq"
+address = "neutron1w06mc6ltfzfh9vj65t4fa49tnexj42vqhadwqwyqk3kzuculmcmqdvm8qh"
 
 [[contract]]
 type = "astroport_liquid_pooler"
 chain_prefix = "neutron"
-address = "neutron1lvv27zlz3df88wqmk72fyw5dc8qjzgx6njmrsj6tczxvyul44gaqlj6f3s"
+address = "neutron1zh946xg0ra7xn7nxvydgtgmw3zcndqlwt0rsf9y4v9vldw6jzgsqt7fzlg"
 
 [[contract]]
 type = "remote_chain_splitter"
 chain_prefix = "neutron"
-address = "neutron1ae09hqakgfldu0vesa3mtutadqq6mnqlpeuy95dqqy25wzrv620qemzfyp"
+address = "neutron1wtj5qu97tk4jp6cmcd4qt776ymn3ql4ct7hwsm4p52yg9zpxf6nquhkndn"
 
 [[contract]]
 type = "interchain_router"
 chain_prefix = "neutron"
-address = "neutron1gagpgagegcksjqjgx3an35hpfgeqje8cjvdfx67ld55t3pwq5h8sk2dc05"
+address = "neutron19ypnaexra8hspren0gagtz2r00ym57t93e27kuwckyysys0h376qedrh9l"
 
 [[chain]]
 chain_prefix = "neutron"
 base_denom = "untrn"
-endpoint = "https://0.0.0.0:37425"
+endpoint = "https://0.0.0.0:41781"

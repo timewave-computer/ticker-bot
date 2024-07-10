@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
@@ -12,29 +13,23 @@ use astroport::native_coin_registry::InstantiateMsg as NativeCoinRegistryInstant
 use astroport::pair::ExecuteMsg as PairExecuteMsg;
 use astroport::pair::StablePoolParams;
 
-use cosmwasm_std::{coin, Binary, Coin, Decimal, Uint128, Uint64};
+use cosmwasm_std::{Binary, Coin, Decimal, Uint128, Uint64};
 use covenant_utils::{InterchainCovenantParty, PoolPriceConfig, SingleSideLpLimits};
 use cw_utils::Expiration;
 use local_ictest_e2e::utils::constants::{
-    ACC_0_ADDRESS_GAIA, ACC_1_ADDRESS_GAIA, ACC_1_ADDRESS_NEUTRON, ADMIN_KEY, ASTROPORT_PATH,
-    BOT_ADDRESS, GAIA_CHAIN, LOGS_PATH, NATIVE_ATOM_DENOM, NATIVE_STATOM_DENOM, NEUTRON_CHAIN_ID,
-    STRIDE_CHAIN, TICKER_BOT_CONFIG_LOCATION, VALENCE_PATH,
-};
-use local_ictest_e2e::utils::file_system::{read_json_file, read_logs_file};
-use local_ictest_e2e::utils::ibc::{get_ibc_denom, ibc_send};
-use local_ictest_e2e::utils::liquid_staking::set_up_host_zone;
-
-use local_ictest_e2e::utils::setup::deploy_contracts_on_chain;
-use local_ictest_e2e::utils::stride::liquid_stake;
-use local_ictest_e2e::utils::{
-    constants::{ACC_0_ADDRESS_NEUTRON, ACC_0_KEY, API_URL, CHAIN_CONFIG_PATH, NEUTRON_CHAIN},
-    test_context::TestContext,
+    ACC_1_ADDRESS_GAIA, ACC_1_ADDRESS_NEUTRON, ADMIN_KEY, ASTROPORT_PATH, BOT_ADDRESS,
+    EXECUTE_FLAGS, LOCAL_CODE_ID_CACHE_PATH, LOGS_PATH, NATIVE_STATOM_DENOM,
+    TICKER_BOT_CONFIG_LOCATION, VALENCE_PATH,
 };
 
+use local_ictest_e2e::utils::file_system::read_logs_file;
 use localic_std::modules::bank::send;
 use localic_std::modules::cosmwasm::{contract_execute, contract_query};
-use localic_std::{
-    errors::LocalError, modules::cosmwasm::contract_instantiate, polling::poll_for_start,
+use localic_std::{modules::cosmwasm::contract_instantiate, polling::poll_for_start};
+use localic_utils::{
+    ConfigChainBuilder, TestContextBuilder, DEFAULT_KEY, GAIA_CHAIN_NAME, LOCAL_IC_API_URL,
+    NEUTRON_CHAIN_ADMIN_ADDR, NEUTRON_CHAIN_ID, NEUTRON_CHAIN_NAME, STRIDE_CHAIN_ADMIN_ADDR,
+    STRIDE_CHAIN_NAME,
 };
 use reqwest::blocking::Client;
 use ticker_bot::config::{Chain, Config, Contract, ContractType};
@@ -46,57 +41,70 @@ use valence_covenant_single_party_pol::msg::{
 };
 
 // Run 'local-ic start neutron_gaia --api-port 42069' before running the tests
-fn main() -> Result<(), LocalError> {
+fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     let client = Client::new();
-    poll_for_start(&client, API_URL, 300)?;
+    poll_for_start(&client, LOCAL_IC_API_URL, 300)?;
 
-    let configured_chains = read_json_file(CHAIN_CONFIG_PATH).unwrap();
+    let mut test_ctx = TestContextBuilder::default()
+        .with_unwrap_raw_logs(true)
+        .with_chain(ConfigChainBuilder::default_neutron().build()?)
+        .with_chain(ConfigChainBuilder::default_stride().build()?)
+        .with_chain(ConfigChainBuilder::default_gaia().build()?)
+        .with_artifacts_dir("artifacts")
+        .with_transfer_channels(NEUTRON_CHAIN_NAME, GAIA_CHAIN_NAME)
+        .with_transfer_channels(STRIDE_CHAIN_NAME, GAIA_CHAIN_NAME)
+        .with_transfer_channels(STRIDE_CHAIN_NAME, NEUTRON_CHAIN_NAME)
+        .build()?;
 
-    let mut test_ctx = TestContext::from(configured_chains);
+    let mut uploader = test_ctx.build_tx_upload_contracts();
+    uploader
+        .send_with_local_cache(VALENCE_PATH, NEUTRON_CHAIN_NAME, LOCAL_CODE_ID_CACHE_PATH)
+        .unwrap();
 
-    deploy_contracts_on_chain(&mut test_ctx, ASTROPORT_PATH, NEUTRON_CHAIN);
-    deploy_contracts_on_chain(&mut test_ctx, VALENCE_PATH, NEUTRON_CHAIN);
+    uploader
+        .send_with_local_cache(ASTROPORT_PATH, NEUTRON_CHAIN_NAME, LOCAL_CODE_ID_CACHE_PATH)
+        .unwrap();
 
     let astroport_native_coin_registry_code_id = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("astroport_native_coin_registry")
         .unwrap();
 
     let astroport_pair_stable_code_id = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("astroport_pair_stable")
         .unwrap();
 
     let astroport_token_code_id = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("astroport_token")
         .unwrap();
 
     let astroport_whitelist_code_id = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("astroport_whitelist")
         .unwrap();
 
     let astroport_factory_code_id = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("astroport_factory")
         .unwrap();
 
     let native_coin_registry_instantiate_msg = NativeCoinRegistryInstantiateMsg {
-        owner: ACC_0_ADDRESS_NEUTRON.to_string(),
+        owner: NEUTRON_CHAIN_ADMIN_ADDR.to_string(),
     };
 
     let native_coin_registry_contract = contract_instantiate(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
-        ACC_0_KEY,
+            .get_request_builder(NEUTRON_CHAIN_NAME),
+        DEFAULT_KEY,
         astroport_native_coin_registry_code_id,
         &serde_json::to_string(&native_coin_registry_instantiate_msg).unwrap(),
         "native-coin-registry",
@@ -116,7 +124,7 @@ fn main() -> Result<(), LocalError> {
         token_code_id: astroport_token_code_id,
         fee_address: None,
         generator_address: None,
-        owner: ACC_0_ADDRESS_NEUTRON.to_string(),
+        owner: NEUTRON_CHAIN_ADMIN_ADDR.to_string(),
         whitelist_code_id: astroport_whitelist_code_id,
         coin_registry_address: native_coin_registry_contract.address.to_string(),
     };
@@ -124,8 +132,8 @@ fn main() -> Result<(), LocalError> {
     let factory_contract = contract_instantiate(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
-        ACC_0_KEY,
+            .get_request_builder(NEUTRON_CHAIN_NAME),
+        DEFAULT_KEY,
         astroport_factory_code_id,
         &serde_json::to_string(&factory_instantiate_msg).unwrap(),
         "astroport-factory",
@@ -133,24 +141,13 @@ fn main() -> Result<(), LocalError> {
         "",
     )?;
 
+    let atom_denom = test_ctx.get_native_denom().src(GAIA_CHAIN_NAME).get();
     // Add the coins to the registry
-    let neutron_statom_denom = get_ibc_denom(
-        NATIVE_STATOM_DENOM,
-        &test_ctx
-            .get_transfer_channels()
-            .src(STRIDE_CHAIN)
-            .dest(NEUTRON_CHAIN)
-            .get(),
-    );
+    let neutron_statom_denom =
+        test_ctx.get_ibc_denom(NATIVE_STATOM_DENOM, STRIDE_CHAIN_NAME, NEUTRON_CHAIN_NAME);
 
-    let neutron_atom_denom = get_ibc_denom(
-        NATIVE_ATOM_DENOM,
-        &test_ctx
-            .get_transfer_channels()
-            .src(GAIA_CHAIN)
-            .dest(NEUTRON_CHAIN)
-            .get(),
-    );
+    let neutron_atom_denom =
+        test_ctx.get_ibc_denom(&atom_denom, GAIA_CHAIN_NAME, NEUTRON_CHAIN_NAME);
 
     let add_to_registry_msg = NativeCoinRegistryExecuteMsg::Add {
         native_coins: vec![
@@ -162,11 +159,11 @@ fn main() -> Result<(), LocalError> {
     contract_execute(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
+            .get_request_builder(NEUTRON_CHAIN_NAME),
         &native_coin_registry_contract.address,
-        ACC_0_KEY,
+        DEFAULT_KEY,
         &serde_json::to_string(&add_to_registry_msg).unwrap(),
-        "--fees=250000untrn --gas=auto --gas-adjustment=3.0",
+        EXECUTE_FLAGS,
     )?;
 
     // Wait for the coins to be added
@@ -195,90 +192,69 @@ fn main() -> Result<(), LocalError> {
     contract_execute(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
+            .get_request_builder(NEUTRON_CHAIN_NAME),
         &factory_contract.address,
-        ACC_0_KEY,
+        DEFAULT_KEY,
         &serde_json::to_string(&create_pair_msg).unwrap(),
-        "--fees=250000untrn --gas=auto --gas-adjustment=3.0",
+        EXECUTE_FLAGS,
     )?;
 
     // Liquid stake some ATOM to get stATOM on Stride to add liquidity to the astroport pool
 
     // First we have to register Gaia as a host zone
-    set_up_host_zone(&mut test_ctx);
+    test_ctx.set_up_stride_host_zone(GAIA_CHAIN_NAME);
 
-    // Now we can stake using autopilot
+    // Now we can liquid stake
     // transfer some atom to stride
     let amount_to_liquid_stake = 50000000;
-    ibc_send(
-        test_ctx
-            .get_request_builder()
-            .get_request_builder(GAIA_CHAIN),
-        ACC_0_KEY,
-        &test_ctx.get_admin_addr().src(STRIDE_CHAIN).get(),
-        coin(amount_to_liquid_stake, "uatom"),
-        coin(10000, "uatom"),
-        &test_ctx
-            .get_transfer_channels()
-            .src(GAIA_CHAIN)
-            .dest(STRIDE_CHAIN)
-            .get(),
-        None,
-    )
-    .unwrap();
+
+    test_ctx
+        .build_tx_transfer()
+        .with_chain_name(GAIA_CHAIN_NAME)
+        .with_amount(amount_to_liquid_stake)
+        .with_recipient(STRIDE_CHAIN_ADMIN_ADDR)
+        .with_denom(&atom_denom)
+        .send()
+        .unwrap();
 
     // Wait for coins to arrive
     thread::sleep(Duration::from_secs(5));
 
     // liquid stake the ibc'd atoms for stuatom
-    liquid_stake(
-        test_ctx
-            .get_request_builder()
-            .get_request_builder(STRIDE_CHAIN),
-        "uatom",
-        amount_to_liquid_stake,
-    )
-    .unwrap();
+    test_ctx
+        .build_tx_liquid_stake()
+        .with_key(ADMIN_KEY)
+        .with_amount(amount_to_liquid_stake)
+        .with_denom(&atom_denom)
+        .send()
+        .unwrap();
 
     // send the stATOM to neutron to eventually add it to the pool
-    ibc_send(
-        test_ctx
-            .get_request_builder()
-            .get_request_builder(STRIDE_CHAIN),
-        ADMIN_KEY,
-        ACC_0_ADDRESS_NEUTRON,
-        coin(amount_to_liquid_stake, NATIVE_STATOM_DENOM),
-        coin(100000, "ustrd"),
-        &test_ctx
-            .get_transfer_channels()
-            .src(STRIDE_CHAIN)
-            .dest(NEUTRON_CHAIN)
-            .get(),
-        None,
-    )?;
+    test_ctx
+        .build_tx_transfer()
+        .with_chain_name(STRIDE_CHAIN_NAME)
+        .with_key(ADMIN_KEY)
+        .with_amount(amount_to_liquid_stake)
+        .with_recipient(NEUTRON_CHAIN_ADMIN_ADDR)
+        .with_denom(NATIVE_STATOM_DENOM)
+        .send()
+        .unwrap();
 
     // Send some ATOM as well
-    ibc_send(
-        test_ctx
-            .get_request_builder()
-            .get_request_builder(GAIA_CHAIN),
-        ACC_0_ADDRESS_GAIA,
-        ACC_0_ADDRESS_NEUTRON,
-        coin(50000000, NATIVE_ATOM_DENOM),
-        coin(100000, "uatom"),
-        &test_ctx
-            .get_transfer_channels()
-            .src(GAIA_CHAIN)
-            .dest(NEUTRON_CHAIN)
-            .get(),
-        None,
-    )?;
+    test_ctx
+        .build_tx_transfer()
+        .with_chain_name(GAIA_CHAIN_NAME)
+        .with_amount(50000000)
+        .with_recipient(NEUTRON_CHAIN_ADMIN_ADDR)
+        .with_denom(&atom_denom)
+        .send()
+        .unwrap();
 
     // Get the pool address
     let pair_info = contract_query(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
+            .get_request_builder(NEUTRON_CHAIN_NAME),
         &factory_contract.address,
         &serde_json::to_string(&FactoryQueryMsg::Pair {
             asset_infos: vec![
@@ -314,59 +290,61 @@ fn main() -> Result<(), LocalError> {
         ],
         slippage_tolerance: Some(Decimal::percent(1)),
         auto_stake: Some(false),
-        receiver: Some(ACC_0_ADDRESS_NEUTRON.to_string()),
+        receiver: Some(NEUTRON_CHAIN_ADMIN_ADDR.to_string()),
     };
 
     contract_execute(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
+            .get_request_builder(NEUTRON_CHAIN_NAME),
         pool_addr,
-        ACC_0_KEY,
+        DEFAULT_KEY,
         &serde_json::to_string(&provide_liquidity_msg).unwrap(),
-        &format!("--amount 10000000{neutron_atom_denom},10000000{neutron_statom_denom} --fees=250000untrn --gas=auto --gas-adjustment=3.0"),
+        &format!(
+            "--amount 10000000{neutron_atom_denom},10000000{neutron_statom_denom} {EXECUTE_FLAGS}"
+        ),
     )?;
 
     thread::sleep(Duration::from_secs(5));
 
     let code_id_ibc_forwarder = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("valence_ibc_forwarder")
         .unwrap();
 
     let code_id_single_party_pol_holder = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("valence_single_party_pol_holder")
         .unwrap();
 
     let code_id_remote_chain_splitter = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("valence_remote_chain_splitter")
         .unwrap();
 
     let code_id_astroport_liquid_pooler = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("valence_astroport_liquid_pooler")
         .unwrap();
 
     let code_id_stride_liquid_staker = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("valence_stride_liquid_staker")
         .unwrap();
 
     let code_id_interchain_router = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("valence_interchain_router")
         .unwrap();
 
     let code_id_single_party_pol_covenant = *test_ctx
-        .get_chain(NEUTRON_CHAIN)
+        .get_chain(NEUTRON_CHAIN_NAME)
         .contract_codes
         .get("valence_covenant_single_party_pol")
         .unwrap();
@@ -375,7 +353,7 @@ fn main() -> Result<(), LocalError> {
     let chain = localic_std::node::Chain::new(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
+            .get_request_builder(NEUTRON_CHAIN_NAME),
     );
     let current_height = chain.get_height();
 
@@ -400,80 +378,66 @@ fn main() -> Result<(), LocalError> {
             ls_denom_on_neutron: neutron_statom_denom.to_string(),
             ls_chain_to_neutron_channel_id: test_ctx
                 .get_transfer_channels()
-                .src(STRIDE_CHAIN)
-                .dest(NEUTRON_CHAIN)
+                .src(STRIDE_CHAIN_NAME)
+                .dest(NEUTRON_CHAIN_NAME)
                 .get(),
             ls_neutron_connection_id: test_ctx
                 .get_connections()
-                .src(NEUTRON_CHAIN)
-                .dest(STRIDE_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(STRIDE_CHAIN_NAME)
                 .get(),
         },
         ls_forwarder_config: CovenantPartyConfig::Interchain(InterchainCovenantParty {
-            party_receiver_addr: ACC_0_ADDRESS_NEUTRON.to_string(),
+            party_receiver_addr: NEUTRON_CHAIN_ADMIN_ADDR.to_string(),
             party_chain_connection_id: test_ctx
                 .get_connections()
-                .src(NEUTRON_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
             ibc_transfer_timeout: Uint64::new(10000),
             party_to_host_chain_channel_id: test_ctx
                 .get_transfer_channels()
-                .src(GAIA_CHAIN)
-                .dest(STRIDE_CHAIN)
+                .src(GAIA_CHAIN_NAME)
+                .dest(STRIDE_CHAIN_NAME)
                 .get(),
             host_to_party_chain_channel_id: test_ctx
                 .get_transfer_channels()
-                .src(STRIDE_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(STRIDE_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
-            remote_chain_denom: NATIVE_ATOM_DENOM.to_string(),
-            addr: ACC_0_ADDRESS_NEUTRON.to_string(),
-            native_denom: get_ibc_denom(
-                NATIVE_ATOM_DENOM,
-                &test_ctx
-                    .get_transfer_channels()
-                    .src(GAIA_CHAIN)
-                    .dest(NEUTRON_CHAIN)
-                    .get(),
-            ),
+            remote_chain_denom: atom_denom.clone(),
+            addr: NEUTRON_CHAIN_ADMIN_ADDR.to_string(),
+            native_denom: neutron_atom_denom.clone(),
             contribution: Coin {
-                denom: NATIVE_ATOM_DENOM.to_string(),
+                denom: atom_denom.to_string(),
                 amount: Uint128::new(10000000),
             },
             denom_to_pfm_map: BTreeMap::new(),
             fallback_address: None,
         }),
         lp_forwarder_config: CovenantPartyConfig::Interchain(InterchainCovenantParty {
-            party_receiver_addr: ACC_0_ADDRESS_NEUTRON.to_string(),
+            party_receiver_addr: NEUTRON_CHAIN_ADMIN_ADDR.to_string(),
             party_chain_connection_id: test_ctx
                 .get_connections()
-                .src(NEUTRON_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
             ibc_transfer_timeout: Uint64::new(10000),
             party_to_host_chain_channel_id: test_ctx
                 .get_transfer_channels()
-                .src(GAIA_CHAIN)
-                .dest(NEUTRON_CHAIN)
+                .src(GAIA_CHAIN_NAME)
+                .dest(NEUTRON_CHAIN_NAME)
                 .get(),
             host_to_party_chain_channel_id: test_ctx
                 .get_transfer_channels()
-                .src(NEUTRON_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
-            remote_chain_denom: NATIVE_ATOM_DENOM.to_string(),
-            addr: ACC_0_ADDRESS_NEUTRON.to_string(),
-            native_denom: get_ibc_denom(
-                NATIVE_ATOM_DENOM,
-                &test_ctx
-                    .get_transfer_channels()
-                    .src(GAIA_CHAIN)
-                    .dest(NEUTRON_CHAIN)
-                    .get(),
-            ),
+            remote_chain_denom: atom_denom.clone(),
+            addr: NEUTRON_CHAIN_ADMIN_ADDR.to_string(),
+            native_denom: neutron_atom_denom.clone(),
             contribution: Coin {
-                denom: NATIVE_ATOM_DENOM.to_string(),
+                denom: atom_denom.clone(),
                 amount: Uint128::new(10000000),
             },
             denom_to_pfm_map: BTreeMap::new(),
@@ -486,15 +450,15 @@ fn main() -> Result<(), LocalError> {
         remote_chain_splitter_config: RemoteChainSplitterConfig {
             channel_id: test_ctx
                 .get_transfer_channels()
-                .src(NEUTRON_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
             connection_id: test_ctx
                 .get_connections()
-                .src(NEUTRON_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
-            denom: NATIVE_ATOM_DENOM.to_string(),
+            denom: neutron_atom_denom.clone(),
             amount: Uint128::from(10000000u128),
             ls_share: Decimal::percent(50),
             native_share: Decimal::percent(50),
@@ -505,32 +469,25 @@ fn main() -> Result<(), LocalError> {
             party_receiver_addr: ACC_1_ADDRESS_GAIA.to_string(),
             party_chain_connection_id: test_ctx
                 .get_connections()
-                .src(NEUTRON_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
             ibc_transfer_timeout: Uint64::new(300),
             party_to_host_chain_channel_id: test_ctx
                 .get_transfer_channels()
-                .src(GAIA_CHAIN)
-                .dest(NEUTRON_CHAIN)
+                .src(GAIA_CHAIN_NAME)
+                .dest(NEUTRON_CHAIN_NAME)
                 .get(),
             host_to_party_chain_channel_id: test_ctx
                 .get_transfer_channels()
-                .src(NEUTRON_CHAIN)
-                .dest(GAIA_CHAIN)
+                .src(NEUTRON_CHAIN_NAME)
+                .dest(GAIA_CHAIN_NAME)
                 .get(),
-            remote_chain_denom: NATIVE_ATOM_DENOM.to_string(),
+            remote_chain_denom: atom_denom.clone(),
             addr: ACC_1_ADDRESS_NEUTRON.to_string(),
-            native_denom: get_ibc_denom(
-                NATIVE_ATOM_DENOM,
-                &test_ctx
-                    .get_transfer_channels()
-                    .src(GAIA_CHAIN)
-                    .dest(NEUTRON_CHAIN)
-                    .get(),
-            ),
+            native_denom: neutron_atom_denom.clone(),
             contribution: Coin {
-                denom: NATIVE_ATOM_DENOM.to_string(),
+                denom: atom_denom.clone(),
                 amount: Uint128::new(20000000),
             },
             denom_to_pfm_map: BTreeMap::new(),
@@ -551,8 +508,8 @@ fn main() -> Result<(), LocalError> {
     let contract = contract_instantiate(
         test_ctx
             .get_request_builder()
-            .get_request_builder(NEUTRON_CHAIN),
-        ACC_0_KEY,
+            .get_request_builder(NEUTRON_CHAIN_NAME),
+        DEFAULT_KEY,
         code_id_single_party_pol_covenant,
         &serde_json::to_string(&instantiate_covenant_msg).unwrap(),
         "single-party-pol-covenant",
@@ -563,7 +520,7 @@ fn main() -> Result<(), LocalError> {
     // Now that we successfully instantiated the covenant, let's get all the addresses that we will add to our ticker bot so it can start ticking them
     let ntrn_request_builder = test_ctx
         .get_request_builder()
-        .get_request_builder(NEUTRON_CHAIN);
+        .get_request_builder(NEUTRON_CHAIN_NAME);
 
     let query_response = contract_query(
         ntrn_request_builder,
@@ -690,8 +647,8 @@ fn main() -> Result<(), LocalError> {
         send(
             test_ctx
                 .get_request_builder()
-                .get_request_builder(NEUTRON_CHAIN),
-            ACC_0_KEY,
+                .get_request_builder(NEUTRON_CHAIN_NAME),
+            DEFAULT_KEY,
             address,
             &[Coin {
                 denom: "untrn".to_string(),
