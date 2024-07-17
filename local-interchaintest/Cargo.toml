@@ -15,9 +15,9 @@ sha2 = "0.10.8"
 
 astroport = { git = "https://github.com/astroport-fi/astroport-core.git", rev = "700f66d" }
 localic-utils = { git = "https://github.com/timewave-computer/localic-utils", branch = "main" }
-valence-covenant-single-party-pol = { git = "https://github.com/timewave-computer/covenants", branch = "keyne/permissionless-tick" }
-valence-astroport-liquid-pooler = { git = "https://github.com/timewave-computer/covenants", branch = "keyne/permissionless-tick" }
-covenant-utils = { git = "https://github.com/timewave-computer/covenants", branch = "keyne/permissionless-tick" }
+valence-covenant-single-party-pol = { git = "https://github.com/timewave-computer/covenants", branch = "main" }
+valence-astroport-liquid-pooler = { git = "https://github.com/timewave-computer/covenants", branch = "main" }
+covenant-utils = { git = "https://github.com/timewave-computer/covenants", branch = "main" }
 ticker-bot = { path = "../ticker-bot" }
 toml = "0.8.14"
 cw20 = { version = "0.15.1" }

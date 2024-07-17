@@ -349,6 +349,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .get("valence_covenant_single_party_pol")
         .unwrap();
 
+    let code_id_clock = *test_ctx
+        .get_chain(NEUTRON_CHAIN_NAME)
+        .contract_codes
+        .get("valence_clock")
+        .unwrap();
+
     // Now we can start the covenants
     let chain = localic_std::node::Chain::new(
         test_ctx
@@ -370,6 +376,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             liquid_pooler_code: code_id_astroport_liquid_pooler,
             liquid_staker_code: code_id_stride_liquid_staker,
             interchain_router_code: code_id_interchain_router,
+            clock_code: code_id_clock,
         },
         clock_tick_max_gas: None,
         lockup_period: Expiration::AtHeight(current_height + 110),
@@ -503,6 +510,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 asset_b_limit: Uint128::new(1000000),
             },
         }),
+        operation_mode: covenant_utils::op_mode::ContractOperationModeConfig::Permissionless,
     };
 
     let contract = contract_instantiate(
